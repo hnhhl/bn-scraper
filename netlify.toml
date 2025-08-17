@@ -1,0 +1,38 @@
+[images]
+  remote_images = ["https://source.unsplash.com/.*", "https://images.unsplash.com/.*", "https://ext.same-assets.com/.*", "https://ugc.same-assets.com/.*"]
+
+[build]
+  command = "rm -rf .next && bun install && bun run build"
+
+[build.environment]
+  NODE_VERSION = "18"
+  NEXT_FORCE_CACHE_CLEAR = "true"
+  NETLIFY_NEXT_PLUGIN_LOGGING = "verbose"
+  # Disable secrets scanning for public Supabase keys
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Security settings
+[build.processing]
+  skip_processing = false
+
+[build.processing.css]
+  bundle = true
+  minify = true
+
+[build.processing.js]
+  bundle = true
+  minify = true
+
+[build.processing.html]
+  pretty_urls = true
+
+# Headers for security
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
