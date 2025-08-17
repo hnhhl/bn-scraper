@@ -63,6 +63,8 @@ export interface ProductLink {
   created_at?: string;
 }
 
+
+
 export interface CrawlSession {
   id?: number;
   session_name?: string;
@@ -294,6 +296,86 @@ export const productLinkService = {
       }));
     }
   })
+};
+
+// Simple page tracking using existing product_links table
+export const pageTrackingService = {
+  // Lấy page cao nhất đã crawl cho category
+  getLastCrawledPage: async (categoryId: number): Promise<number> => {
+    const db = initDatabase();
+    const { data, error } = await db
+      .from('product_links')
+      .select('page_number')
+      .eq('category_id', categoryId)
+      .order('page_number', { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+    return data && data.length > 0 ? data[0].page_number : 0;
+  },
+
+  // Lấy tất cả pages đã có data cho category
+  getExistingPages: async (categoryId: number): Promise<number[]> => {
+    const db = initDatabase();
+    const { data, error } = await db
+      .from('product_links')
+      .select('page_number')
+      .eq('category_id', categoryId)
+      .order('page_number');
+
+    if (error) throw error;
+    
+    // Lấy unique page numbers
+    const uniquePages = [...new Set((data || []).map(row => row.page_number))];
+    return uniquePages.sort((a, b) => a - b);
+  },
+
+  // Lấy pages cần crawl tiếp theo (resume từ page cuối)
+  getNextPagesToCrawl: async (categoryId: number, endPage: number = 50): Promise<{ startPage: number, pages: number[] }> => {
+    const lastPage = await pageTrackingService.getLastCrawledPage(categoryId);
+    const startPage = lastPage + 1;
+    
+    if (startPage > endPage) {
+      return { startPage: endPage + 1, pages: [] };
+    }
+
+    const pages = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+    return { startPage, pages };
+  },
+
+  // Reset category (chỉ xóa product_links)
+  resetCategory: async (categoryId: number) => {
+    const db = initDatabase();
+    const { error } = await db
+      .from('product_links')
+      .delete()
+      .eq('category_id', categoryId);
+
+    if (error) throw error;
+  },
+
+  // Thống kê crawl progress
+  getCrawlStats: async (categoryId: number) => {
+    const db = initDatabase();
+    const { data, error } = await db
+      .from('product_links')
+      .select('page_number')
+      .eq('category_id', categoryId);
+
+    if (error) throw error;
+
+    const totalLinks = data?.length || 0;
+    const existingPages = await pageTrackingService.getExistingPages(categoryId);
+    const lastPage = existingPages.length > 0 ? Math.max(...existingPages) : 0;
+
+    return {
+      total_links: totalLinks,
+      pages_crawled: existingPages.length,
+      last_page: lastPage,
+      existing_pages: existingPages,
+      avg_links_per_page: existingPages.length > 0 ? Math.round(totalLinks / existingPages.length) : 0
+    };
+  }
 };
 
 // Session operations

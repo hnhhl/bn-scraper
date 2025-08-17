@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS product_links (
   FOREIGN KEY (category_id) REFERENCES categories (id)
 );
 
+
+
 -- Error logs table
 CREATE TABLE IF NOT EXISTS error_logs (
   id SERIAL PRIMARY KEY,
@@ -77,6 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_products_isbn ON products(isbn);
 CREATE INDEX IF NOT EXISTS idx_product_links_category ON product_links(category_id);
 CREATE INDEX IF NOT EXISTS idx_product_links_crawled ON product_links(crawled);
+CREATE INDEX IF NOT EXISTS idx_product_links_page ON product_links(category_id, page_number);
 
 -- Enable Row Level Security (RLS) for Supabase
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;

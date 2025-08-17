@@ -1003,7 +1003,7 @@ export class BarnesNobleScraper {
     return result;
   }
 
-  async extractProductLinks(pageUrl: string): Promise<{ url: string; text?: string }[]> {
+  async extractProductLinks(pageUrl: string): Promise<{ url: string; text?: string; isLastPage?: boolean }[]> {
     try {
       console.log(`🌐 [SCRAPER] Starting link extraction from: ${pageUrl}`);
       const startTime = Date.now();
@@ -1014,6 +1014,21 @@ export class BarnesNobleScraper {
       console.log(`📥 [SCRAPER] Page loaded in ${requestTime}ms, content: ${response.data.length} chars`);
 
       const $ = cheerio.load(response.data);
+
+      // Check if we're on page 1 content when requesting page > 1 (redirect detection)
+      const requestedPage = this.extractPageFromUrl(pageUrl);
+      
+      // Only check for redirect if we requested page 2 or higher
+      if (requestedPage > 1) {
+        const firstProductNumber = $('.count.ml-0').first().text().trim();
+        
+        if (firstProductNumber === '1') {
+          console.log(`🔄 [SCRAPER] END OF PAGES DETECTED: Requested page ${requestedPage} but got page 1 content (product #1 found) - category has reached its last page`);
+          return [{ url: '', text: '', isLastPage: true }];
+        }
+        
+        console.log(`✅ [SCRAPER] Page ${requestedPage}: First product number is "${firstProductNumber}" (not "1") - continuing crawl`);
+      }
 
       const links: { url: string; text?: string }[] = [];
       const foundUrls = new Set<string>();
@@ -1085,9 +1100,9 @@ export class BarnesNobleScraper {
       console.log(`🔗 [SCRAPER] Extracted ${links.length} product links from ${pageUrl} in ${totalTime}ms`);
 
       if (links.length === 0) {
-        console.log(`⚠️ [SCRAPER] No product links found! Page might be blocked or structure changed`);
+        console.log(`🚫 [SCRAPER] NO LINKS FOUND - Likely reached end of pages for this category`);
         console.log(`📄 [SCRAPER] Page title: ${$('title').text()}`);
-        console.log(`📄 [SCRAPER] Page content preview: ${response.data.substring(0, 200)}...`);
+        return [{ url: '', text: '', isLastPage: true }];
       }
 
       return links;
@@ -1095,6 +1110,12 @@ export class BarnesNobleScraper {
       console.error(`❌ [SCRAPER] Error extracting product links from ${pageUrl}:`, error);
       return [];
     }
+  }
+
+  // Helper method to extract page number from URL
+  private extractPageFromUrl(url: string): number {
+    const pageMatch = url.match(/[?&]page=(\d+)/);
+    return pageMatch ? parseInt(pageMatch[1]) : 1;
   }
 
   async extractProductData(productUrl: string): Promise<any> {

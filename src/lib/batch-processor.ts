@@ -4,7 +4,8 @@ import {
   updateCategoryBestsellerUrl,
   createProductLink,
   updateCategoryStatus,
-  getProductLinksCount
+  getProductLinksCount,
+  pageTrackingService
 } from './database-supabase';
 
 interface Category {
@@ -266,9 +267,40 @@ export class BatchProcessor {
         await updateCategoryStatus(category.id, 'crawling_links');
       }
 
+      // Check what pages we should crawl next
+      let pagesToCrawl: number[] = [];
+      let resumeMessage = '';
+      
+      if (category.id) {
+        const { startPage: nextStartPage, pages } = await pageTrackingService.getNextPagesToCrawl(category.id, endPage);
+        const lastCrawledPage = await pageTrackingService.getLastCrawledPage(category.id);
+        
+        if (lastCrawledPage > 0) {
+          resumeMessage = `(resuming from page ${lastCrawledPage})`;
+          pushBatchLog(`🔄 ${category.name} - Last crawled page: ${lastCrawledPage} ${resumeMessage}`, categoryIndex);
+        }
+        
+        // Filter to only crawl pages within our range
+        pagesToCrawl = pages.filter(page => page >= startPage && page <= endPage);
+      } else {
+        // No category ID, crawl all pages in range
+        pagesToCrawl = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+      }
+
+      if (pagesToCrawl.length === 0) {
+        if (category.id) {
+          const lastCrawledPage = await pageTrackingService.getLastCrawledPage(category.id);
+          pushBatchLog(`✅ ${category.name} - All pages up to ${Math.min(lastCrawledPage, endPage)} already crawled (max: ${endPage})`, categoryIndex);
+          await updateCategoryStatus(category.id, 'completed');
+        }
+        return;
+      }
+
+      pushBatchLog(`📋 ${category.name} - Will crawl ${pagesToCrawl.length} pages: ${pagesToCrawl.slice(0, 5).join(', ')}${pagesToCrawl.length > 5 ? '...' : ''} ${resumeMessage}`, categoryIndex);
+
       let totalLinks = 0;
       let totalDuplicates = 0;
-      for (let page = startPage; page <= endPage; page++) {
+      for (const page of pagesToCrawl) {
         if (!isRunning) {
           pushBatchLog(`⏹️ Stopping at page ${page} - batch cancelled`, categoryIndex);
           break;
@@ -281,6 +313,13 @@ export class BatchProcessor {
           const startTime = Date.now();
           const links = await this.scraper.extractProductLinks(pageUrl);
           const endTime = Date.now();
+
+          // Check if we've reached the last page (redirect to page 1 detected)
+          const isLastPage = links.length > 0 && links[0].isLastPage;
+          if (isLastPage) {
+            pushBatchLog(`🏁 ${category.name} - REACHED END at page ${page}: Category has no more pages beyond page ${page - 1}`, categoryIndex);
+            break; // Exit the page loop early
+          }
 
           pushBatchLog(`📊 ${category.name} - Page ${page}: Found ${links.length} links in ${endTime - startTime}ms`, categoryIndex);
 
@@ -317,11 +356,20 @@ export class BatchProcessor {
           await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
         } catch (pageError: any) {
           pushBatchLog(`❌ ${category.name} - Page ${page} failed: ${pageError?.message || pageError}`, categoryIndex);
-          // Continue with next page
+          // Continue with next page - no need to mark failed since we use actual data
         }
       }
 
+      // Set completed when finishing crawl (either reached natural end or hit max page limit)
       if (category.id) {
+        const lastCrawledPage = await pageTrackingService.getLastCrawledPage(category.id);
+        
+        if (lastCrawledPage >= endPage) {
+          pushBatchLog(`✅ ${category.name} - Reached maximum page limit (${endPage}). Last page: ${lastCrawledPage}, Total links: ${totalLinks}`, categoryIndex);
+        } else {
+          pushBatchLog(`✅ ${category.name} - Crawl completed! Last page: ${lastCrawledPage}, Total links: ${totalLinks}`, categoryIndex);
+        }
+        
         await updateCategoryStatus(category.id, 'completed');
       }
       pushBatchLog(`🎉 COMPLETED ${category.name}: ${totalLinks} total links saved (${totalDuplicates} duplicates)`, categoryIndex);
